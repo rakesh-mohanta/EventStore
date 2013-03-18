@@ -45,20 +45,20 @@ namespace EventStore.ClientAPI.Transport.Tcp
         private static readonly SocketArgsPool SocketArgsPool = new SocketArgsPool("TcpConnection.SocketArgsPool", 
                                                                                    TcpConfiguration.SendReceivePoolSize, 
                                                                                    () => new SocketAsyncEventArgs());
-        internal static TcpConnection CreateConnectingTcpConnection(IPEndPoint remoteEndPoint,
+        internal static TcpConnection CreateConnectingTcpConnection(Guid connectionId, 
+                                                                    IPEndPoint remoteEndPoint,
                                                                     TcpClientConnector connector,
                                                                     Action<TcpConnection> onConnectionEstablished,
                                                                     Action<TcpConnection, SocketError> onConnectionFailed,
                                                                     Action<TcpConnection, SocketError> onConnectionClosed)
         {
-            var connection = new TcpConnection(remoteEndPoint, onConnectionClosed);
+            var connection = new TcpConnection(connectionId, remoteEndPoint, onConnectionClosed);
             connector.InitConnect(remoteEndPoint,
                                   (_, socket) =>
                                   {
                                       connection.InitSocket(socket);
                                       if (onConnectionEstablished != null)
                                           onConnectionEstablished(connection);
-                                      connection.TrySend();
                                   },
                                   (_, socketError) =>
                                   {
@@ -68,13 +68,17 @@ namespace EventStore.ClientAPI.Transport.Tcp
             return connection;
         }
 
-        internal static TcpConnection CreateAcceptedTcpConnection(IPEndPoint effectiveEndPoint, Socket socket, Action<TcpConnection, SocketError> onConnectionClosed)
+        internal static TcpConnection CreateAcceptedTcpConnection(Guid connectionId, 
+                                                                  IPEndPoint effectiveEndPoint, 
+                                                                  Socket socket, 
+                                                                  Action<TcpConnection, SocketError> onConnectionClosed)
         {
-            var connection = new TcpConnection(effectiveEndPoint, onConnectionClosed);
+            var connection = new TcpConnection(connectionId, effectiveEndPoint, onConnectionClosed);
             connection.InitSocket(socket);
             return connection;
         }
 
+        public readonly Guid ConnectionId;
         public IPEndPoint EffectiveEndPoint { get; private set; }
         public int SendQueueSize { get { return _sendQueue.Count; } }
 
@@ -94,19 +98,21 @@ namespace EventStore.ClientAPI.Transport.Tcp
         private Action<ITcpConnection, IEnumerable<ArraySegment<byte>>> _receiveCallback;
         private readonly Action<TcpConnection, SocketError> _onConnectionClosed;
 
-        private int _packagesSent;
+        private volatile int _packagesSent;
         private long _bytesSent;
-        private int _packagesReceived;
+        private volatile int _packagesReceived;
         private long _bytesReceived;
-        private int _sentAsyncs;
-        private int _sentAsyncCallbacks;
-        private int _recvAsyncs;
-        private int _recvAsyncCallbacks;
+        private volatile int _sentAsyncs;
+        private volatile int _sentAsyncCallbacks;
+        private volatile int _recvAsyncs;
+        private volatile int _recvAsyncCallbacks;
 
-        private TcpConnection(IPEndPoint effectiveEndPoint, Action<TcpConnection, SocketError> onConnectionClosed)
+        private TcpConnection(Guid connectionId, IPEndPoint effectiveEndPoint, Action<TcpConnection, SocketError> onConnectionClosed)
         {
+            Ensure.NotEmptyGuid(connectionId, "connectionId");
             Ensure.NotNull(effectiveEndPoint, "effectiveEndPoint");
 
+            ConnectionId = connectionId;
             EffectiveEndPoint = effectiveEndPoint;
             _onConnectionClosed = onConnectionClosed;
         }
@@ -141,6 +147,7 @@ namespace EventStore.ClientAPI.Transport.Tcp
                 _sendSocketArgs.Completed += OnSendAsyncCompleted;
             }
             StartReceive();
+            TrySend();
         }
 
         public void EnqueueSend(IEnumerable<ArraySegment<byte>> data)
@@ -368,17 +375,19 @@ namespace EventStore.ClientAPI.Transport.Tcp
 
             NotifyClosed();
 
-            //Console.WriteLine(
-            //    "[{0}]:\nReceived packages: {1}, bytes: {2}\nSent packages: {3}, bytes: {4}\nSendAsync calls: {5}, callbacks: {6}\nReceiveAsync calls: {7}, callbacks: {8}\n",
-            //    EffectiveEndPoint,
-            //    _packagesReceived,
-            //    _bytesReceived,
-            //    _packagesSent,
-            //    _bytesSent,
-            //    _sentAsyncs,
-            //    _sentAsyncCallbacks,
-            //    _recvAsyncs,
-            //    _recvAsyncCallbacks);
+            Console.WriteLine("[{0:HH:mm:ss.fff}: {1}]:\nConnection ID: {2:B}\nReceived packages: {3}, bytes: {4}\nSent packages: {5}, bytes: {6}\n"
+                              + "SendAsync calls: {7}, callbacks: {8}\nReceiveAsync calls: {9}, callbacks: {10}\n",
+                              DateTime.UtcNow,
+                              EffectiveEndPoint,
+                              ConnectionId,
+                              _packagesReceived,
+                              Interlocked.Read(ref _bytesReceived),
+                              _packagesSent,
+                              Interlocked.Read(ref _bytesSent),
+                              _sentAsyncs,
+                              _sentAsyncCallbacks,
+                              _recvAsyncs,
+                              _recvAsyncCallbacks);
 
             if (_socket != null)
             {

@@ -30,6 +30,7 @@ using System;
 using System.Threading;
 using EventStore.ClientAPI;
 using EventStore.Core.Tests.ClientAPI.Helpers;
+using EventStore.Core.Tests.Helper;
 using NUnit.Framework;
 
 namespace EventStore.Core.Tests.ClientAPI
@@ -37,7 +38,7 @@ namespace EventStore.Core.Tests.ClientAPI
     [TestFixture, Category("LongRunning")]
     public class subscribe_to_all_should: SpecificationWithDirectory
     {
-        private const int Timeout = 60000;
+        private const int Timeout = 10000;
         
         private MiniNode _node;
 
@@ -60,7 +61,7 @@ namespace EventStore.Core.Tests.ClientAPI
         public void allow_multiple_subscriptions()
         {
             const string stream = "subscribe_to_all_should_allow_multiple_subscriptions";
-            using (var store = EventStoreConnection.Create(ConnectionSettings.Create().UseConsoleLogger()))
+            using (var store = EventStoreConnection.Create(ConnectionSettings.Create().UseCustomLogger(ClientApiLoggerBridge.Default)))
             {
                 store.Connect(_node.TcpEndPoint);
                 var appeared = new CountdownEvent(2);
@@ -72,8 +73,6 @@ namespace EventStore.Core.Tests.ClientAPI
                 using (store.SubscribeToAll(false, eventAppeared, subscriptionDropped).Result)
                 using (store.SubscribeToAll(false, eventAppeared, subscriptionDropped).Result)
                 {
-                    Thread.Sleep(100);
-
                     var create = store.CreateStreamAsync(stream, Guid.NewGuid(), false, new byte[0]);
                     Assert.IsTrue(create.Wait(Timeout), "StreamCreateAsync timed out.");
 
@@ -86,7 +85,7 @@ namespace EventStore.Core.Tests.ClientAPI
         public void catch_created_and_deleted_events_as_well()
         {
             const string stream = "subscribe_to_all_should_catch_created_and_deleted_events_as_well";
-            using (var store = EventStoreConnection.Create(ConnectionSettings.Create().UseConsoleLogger()))
+            using (var store = EventStoreConnection.Create(ConnectionSettings.Create().UseCustomLogger(ClientApiLoggerBridge.Default)))
             {
                 store.Connect(_node.TcpEndPoint);
                 var appeared = new CountdownEvent(2);
