@@ -78,11 +78,12 @@ namespace EventStore.Core
         private readonly NetworkSendService _networkSendService;
 
         private readonly NodeSubsystems[] _enabledNodeSubsystems;
-        
+        private readonly ISubsystem[] _subsystems;
+
         public SingleVNode(TFChunkDb db, 
                            SingleVNodeSettings vNodeSettings, 
                            bool dbVerifyHashes, NodeSubsystems[] enabledNodeSubsystems,
-                           int memTableEntryCount = ESConsts.MemTableEntryCount)
+                           int memTableEntryCount, params  ISubsystem[] subsystems)
         {
             Ensure.NotNull(db, "db");
             Ensure.NotNull(vNodeSettings, "vNodeSettings");
@@ -96,6 +97,7 @@ namespace EventStore.Core
             _controller.SetMainQueue(_mainQueue);
 
             _enabledNodeSubsystems = enabledNodeSubsystems;
+            _subsystems = subsystems;
 
             // MONITORING
             var monitoringInnerBus = new InMemoryBus("MonitoringInnerBus", watchSlowMsg: false);
@@ -241,16 +243,31 @@ namespace EventStore.Core
 
             monitoringQueue.Start();
             _mainQueue.Start();
+
+            foreach (var subsystem in subsystems)
+            {
+                subsystem.Register(db, _mainQueue, _mainBus, _timerService, _httpService, _networkSendService);
+            }
         }
 
         public void Start()
         {
             _mainQueue.Publish(new SystemMessage.SystemInit());
+            //TODO: replace with messages
+            foreach (var subsystem in _subsystems)
+            {
+                subsystem.Start();
+            }
         }
 
         public void Stop(bool exitProcess)
         {
             _mainQueue.Publish(new ClientMessage.RequestShutdown(exitProcess));
+            //TODO: replace with messages
+            foreach (var subsystem in _subsystems)
+            {
+                subsystem.Stop();
+            }
         }
 
         public override string ToString()
